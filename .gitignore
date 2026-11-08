@@ -13,6 +13,9 @@ dist/
 
 # Temp backups
 bin.bak/
+.update-*/
+.maintenance.lock
+version.txt
 
 # Logs
 logs/

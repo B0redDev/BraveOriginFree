@@ -1,13 +1,14 @@
-# BraveOriginFree - Set as Default Browser (Windows)
-# Sets Brave Origin as the default browser for HTTP/HTTPS and common file types
-
-$ErrorActionPreference = "SilentlyContinue"
+# Register the shared launcher; Windows Settings still controls the user's defaults.
+$ErrorActionPreference = 'Stop'
+. "$PSScriptRoot\src\runtime.ps1"
 
 $AppDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $BinDir = Join-Path $AppDir "bin"
-$DataDir = Join-Path $AppDir "data"
+$Launcher = Join-Path $AppDir 'Launch.vbs'
 $OriginExe = Join-Path $BinDir "brave.exe"
 $AppName = "BraveOriginFree"
+$Command = (ConvertTo-WindowsArgument (Join-Path $env:SystemRoot 'System32\wscript.exe')) +
+    ' //nologo ' + (ConvertTo-WindowsArgument $Launcher)
 
 if (-not (Test-Path $OriginExe)) {
     Write-Host "[!] Brave Origin not found. Run install.bat first." -ForegroundColor Red
@@ -33,14 +34,8 @@ New-ItemProperty -Path $regPath -Name "(Default)" -Value "Brave Origin Free" -Pr
 New-Item -Path "$regPath\DefaultIcon" -Force | Out-Null
 New-ItemProperty -Path "$regPath\DefaultIcon" -Name "(Default)" -Value "`"$OriginExe`",0" -PropertyType String -Force | Out-Null
 New-Item -Path "$regPath\shell\open\command" -Force | Out-Null
-New-ItemProperty -Path "$regPath\shell\open\command" -Name "(Default)" -Value "`"$OriginExe`" --user-data-dir=`"$DataDir`" --no-first-run --no-default-browser-check `"%1`"" -PropertyType String -Force | Out-Null
+New-ItemProperty -Path "$regPath\shell\open\command" -Name "(Default)" -Value "$Command `"%1`"" -PropertyType String -Force | Out-Null
 
-# Register for HTTP/HTTPS
-@("http", "https", ".html", ".htm") | ForEach-Object {
-    $p = "HKCU:\Software\Classes\$_"
-    New-Item -Path $p -Force | Out-Null
-    New-ItemProperty -Path $p -Name "(Default)" -Value $progId -PropertyType String -Force | Out-Null
-}
 
 # Register in RegisteredApplications
 $regApps = "HKCU:\Software\RegisteredApplications"
@@ -69,14 +64,8 @@ New-ItemProperty -Path $appReg -Name "(Default)" -Value "Brave Origin Free" -Pro
 New-Item -Path "$appReg\DefaultIcon" -Force | Out-Null
 New-ItemProperty -Path "$appReg\DefaultIcon" -Name "(Default)" -Value "`"$OriginExe`",0" -PropertyType String -Force | Out-Null
 New-Item -Path "$appReg\shell\open\command" -Force | Out-Null
-New-ItemProperty -Path "$appReg\shell\open\command" -Name "(Default)" -Value "`"$OriginExe`" --user-data-dir=`"$DataDir`" --no-first-run --no-default-browser-check" -PropertyType String -Force | Out-Null
+New-ItemProperty -Path "$appReg\shell\open\command" -Name "(Default)" -Value $Command -PropertyType String -Force | Out-Null
 
-Write-Host "[O] Registration complete!" -ForegroundColor Green
-Write-Host ""
-Write-Host "Note: On Windows 10/11, the 'Default Apps' setting may still" -ForegroundColor Yellow
-Write-Host "show the system prompt. If it does:" -ForegroundColor Yellow
-Write-Host "  1. Open Settings > Apps > Default apps" -ForegroundColor Gray
-Write-Host "  2. Search for 'Brave Origin Free'" -ForegroundColor Gray
-Write-Host "  3. Set it as default for HTTP/HTTPS" -ForegroundColor Gray
-Write-Host ""
+Write-Host "[O] Registration complete. Now choose Brave Origin Free in Windows Settings > Apps > Default apps." -ForegroundColor Green
+Write-Host "Moving this folder requires running MakeDefault.bat again." -ForegroundColor Yellow
 Read-Host "Press Enter to exit"

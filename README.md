@@ -18,19 +18,18 @@
 
 ## ✨ What's New in Latest Version
 
-- ⚡ **Faster Launch** - `Launch.bat` for instant startup with no menu delays
-- 🚀 **Improved run.bat** - Optimized for quicker browser launch
-- 🌐 **Set as Default Browser** - New `MakeDefault.bat` + `make-default.ps1` to register Brave Origin as your default browser (works without admin)
-- 📦 **Auto-Install Flow** - Smarter installer that launches automatically if not installed
-- 📝 **Better Documentation** - Added Contributing, Code of Conduct, and Changelog
+- **One launch path** - `Launch.vbs`, the desktop shortcut and default-browser registration start `src/launch.ps1` without opening a console.
+- **Verified updates** - Downloads require the official GitHub asset SHA256 digest and a valid Brave Authenticode signature before replacing the installed browser.
+- **Profile safety** - Existing settings are preserved; writes use an exclusive lock, atomic replacement and a backup.
+- **Windows checks** - Regression checks run under Windows PowerShell 5.1 before releases are published.
 
 ---
 
 ## 📖 About
 
-Brave Origin is a stripped-down version of Brave — same privacy, same Shields, same speed — but without Rewards, Wallet, Leo AI, News, VPN, Tor, or telemetry. It's the browser you want when you want Brave's core without the extras.
+This is a portable Windows x64 wrapper around the official Brave Origin build, not a browser fork. It configures a separate profile and requests that optional Brave features be disabled through launch flags.
 
-On Linux, it's free. On Windows, Brave charges $60. This project removes that paywall by applying the same local activation configuration used by the Linux version. **No cracks. No modified binaries. Just configuration.**
+The activation configuration depends on Brave's implementation and may stop working after an upstream update. Feature availability, privacy behavior and license terms are determined by Brave; this repository does not establish that bypassing a purchase requirement is permitted.
 
 ---
 
@@ -43,14 +42,17 @@ On Linux, it's free. On Windows, Brave charges $60. This project removes that pa
 4. Done! A desktop shortcut will be created
 
 ### Launching
-- **Instant Launch:** Double-click `Launch.bat` (Recommended)
-- **Standard Launch:** Double-click `run.bat`
+- **Launch:** Double-click `Launch.vbs` to start without a terminal window.
 - **Desktop Shortcut:** Use "Brave Origin (Free)" shortcut
+
+Launch failures and update warnings appear as dialogs instead of disappearing into a hidden terminal. Installation and manual maintenance still use PowerShell. For detailed diagnostics, run `powershell.exe -NoProfile -ExecutionPolicy Bypass -File src\launch.ps1` from this folder. Windows Script Host and the Windows VBScript feature must be enabled.
 
 ### Make it Default Browser
 1. Run `MakeDefault.bat`
 2. Follow the prompts
-3. Also set via `Windows Settings → Apps → Default apps → Brave Origin Free` if needed
+3. Choose it in `Windows Settings → Apps → Default apps → Brave Origin Free`.
+
+Registration writes per-user registry entries, but does not override Windows' default-app selection. After moving the folder, rerun `install.bat` to refresh the shortcut and `MakeDefault.bat` to refresh registration.
 
 ---
 
@@ -58,26 +60,39 @@ On Linux, it's free. On Windows, Brave charges $60. This project removes that pa
 
 | Feature | Status |
 | --- | --- |
-| Brave Shields | ✅ Enabled |
-| Bookmarks & History | ✅ Enabled |
-| Privacy Protection | ✅ Enabled |
-| Rewards, Wallet, Leo AI | ❌ Disabled |
-| Brave News, Talk, VPN, Tor | ❌ Disabled |
-| P3A, Ads Telemetry | ❌ Disabled |
-| Portable (No Installation) | ✅ Yes |
-| No Admin Rights Required | ✅ Yes |
-| Auto-Updates Support | ✅ Yes |
-| Works from USB Drive | ✅ Yes |
+| Brave Shields, bookmarks and history | Provided by the official browser |
+| Rewards, Wallet, Leo AI, News, Talk, VPN, Tor | Disabling requested via shared launch flags |
+| P3A and Ads telemetry | Disabling requested; absence of telemetry is not guaranteed |
+| Portable, no admin rights required | Yes; use a writable folder |
+| Updates | Checked before launch when no Brave process is running |
+| Windows support | Windows 10/11 x64, Windows PowerShell 5.1 |
+
+### Updates and recovery
+
+The launcher installs the latest stable Origin build when needed. A download can delay startup. There is no background updater or scheduled task; close **all** Brave processes and launch again to check for updates. Component updates and background networking are not globally disabled.
+
+If an update fails, an existing browser with a valid Brave signature can still launch with a warning. A first installation fails instead. Do not treat offline fallback as confirmation that the installed version is current.
+
+Manual commands:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File src\update.ps1 -CheckOnly
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File src\update.ps1
+```
+
+The updater checks the archive SHA256 against GitHub release metadata and checks `brave.exe`'s signer and product version. Missing verification metadata is an error. Downloads and extraction happen in a staging directory; failed replacement rolls back to the previous directory. The updater never changes the profile. If rollback itself fails, the error names the `.update-...\previous` recovery directory; do not delete it.
 
 ---
 
 ## 🛠️ How It Works
 
-Brave Origin reads activation from `Local State`. This project writes the same values used on Linux:
+The patcher writes these local activation keys:
 ```json
 {"brave":{"origin":{"purchase_validated":true}},"skus":{"state":{"67":"{\"credentials\":{\"items\":{\"6\":\"7\"}}}"}}}
 ```
-The check is entirely local — no Brave servers contacted for validation.
+The script only changes local configuration; it does not verify that Brave accepts it or guarantee the browser's network behavior.
+
+Close all Brave processes before patching. Explicit `-ProfilePath` can initialize a new profile; malformed JSON or unexpected object types are rejected without replacing existing data. A changed existing `Local State` is backed up as `Local State.braveoriginfree.bak`; an already-configured file is left untouched. `-Status` exits 0 only when both configured keys match, otherwise 1.
 
 ---
 
@@ -85,14 +100,18 @@ The check is entirely local — no Brave servers contacted for validation.
 
 ```
 BraveOriginFree/
-├── install.bat      # First-time installer
-├── run.bat          # Standard launcher (optimized)
-├── Launch.bat       # Instant launcher
-├── MakeDefault.bat  # Set as default browser
-├── make-default.ps1 # Default browser registration
+├── install.bat       # Verified setup and desktop shortcut
+├── Launch.vbs        # Console-free launcher
+├── MakeDefault.bat   # Register a default-browser candidate
+├── make-default.ps1  # Per-user registration
 ├── src/
-│   ├── bypass.ps1   # Standalone patcher
-│   └── update.ps1   # Update checker
+│   ├── install.ps1   # Setup using the verified updater
+│   ├── launch.ps1    # Update check, profile setup and launch flags
+│   ├── runtime.ps1   # Shared Windows helpers
+│   ├── bypass.ps1    # Safe profile patcher
+│   ├── update.ps1    # Verified, staged installation/update
+│   └── package.ps1   # Release archive builder
+├── tests/            # Isolated PowerShell regression checks
 └── README.md
 ```
 
@@ -112,4 +131,4 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 This project is licensed under the MIT License - see [LICENSE](LICENSE) file for details.
 
-**Disclaimer:** This project is for educational purposes. Brave Origin is a product of [Brave Software](https://brave.com). We use only official signed builds from Brave's GitHub releases.
+**Disclaimer:** Brave Origin is a product of [Brave Software](https://brave.com). The MIT license here covers this project's code, not a grant of rights to Brave's products or services. Downloads use official Brave GitHub releases; local configuration does not guarantee continued activation.

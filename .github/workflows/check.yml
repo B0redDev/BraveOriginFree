@@ -1,0 +1,48 @@
+name: Check
+
+on:
+  push:
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # shell: powershell is Windows PowerShell 5.1, the supported runtime.
+      - name: Parse all scripts
+        shell: powershell
+        run: |
+          $failed = $false
+          $files = Get-ChildItem -Recurse -File -Include *.ps1 -Path . |
+            Where-Object { $_.FullName -notmatch '[\\/](bin|dist|data|\.git)[\\/]' }
+          foreach ($f in $files) {
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$errors)
+            foreach ($e in $errors) {
+              Write-Host "$($f.FullName):$($e.Extent.StartLineNumber): $($e.Message)"
+              $failed = $true
+            }
+          }
+          Write-Host "Parsed $(@($files).Count) scripts"
+          if ($failed) { exit 1 }
+
+      - name: Run tests
+        shell: powershell
+        run: |
+          $tests = @(Get-ChildItem -Path tests -Filter *.ps1 -File | Sort-Object Name)
+          if (-not $tests.Count) { Write-Host 'No tests/*.ps1 found'; exit 1 }
+          $failed = @()
+          foreach ($t in $tests) {
+            Write-Host "== $($t.Name)"
+            powershell.exe -NoProfile -ExecutionPolicy Bypass -File $t.FullName
+            if ($LASTEXITCODE -ne 0) { Write-Host "FAILED ($LASTEXITCODE): $($t.Name)"; $failed += $t.Name }
+          }
+          if ($failed) { Write-Host "Failed: $($failed -join ', ')"; exit 1 }

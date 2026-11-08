@@ -1,101 +1,128 @@
-# BraveOriginFree - Update Checker
+# Verified installation/update; the profile is never changed here.
+param(
+    [switch]$CheckOnly,
+    [ValidatePattern('^(latest|\d+\.\d+\.\d+)$')][string]$Version = 'latest'
+)
 
-param([switch]$CheckOnly)
+. "$PSScriptRoot\runtime.ps1"
 
-$AppDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$RootDir = Resolve-Path (Join-Path $AppDir "..")
-$BinDir = Join-Path $RootDir "bin"
-$DataDir = Join-Path $RootDir "data"
-$OriginExe = Join-Path $BinDir "brave.exe"
-$VersionFile = Join-Path $RootDir "version.txt"
-
-Write-Host "BraveOriginFree - Update Checker" -ForegroundColor Cyan
-Write-Host ""
-
-# Current version
-$current = "unknown"
-if (Test-Path $VersionFile) {
-    $current = (Get-Content $VersionFile -Raw).Trim()
-} elseif (Test-Path $OriginExe) {
-    try { $current = (Get-Item $OriginExe).VersionInfo.FileVersion } catch {}
-}
-Write-Host "Installed: v$current" -ForegroundColor Gray
-
-# Latest from GitHub
-Write-Host "Checking for updates..." -ForegroundColor Yellow
-try {
-    $release = Invoke-WebRequest "https://api.github.com/repos/brave/brave-browser/releases/latest" -UseBasicParsing -TimeoutSec 15 | ConvertFrom-Json
-    $latest = $release.tag_name -replace '^v', ''
-    Write-Host "Latest:    v$latest" -ForegroundColor Gray
-} catch {
-    Write-Host "Could not reach GitHub. Check your internet." -ForegroundColor Red
-    exit 1
-}
-
-if ($current -eq $latest) {
-    Write-Host "You have the latest version." -ForegroundColor Green
-    exit 0
-}
-
-if ($current -eq "unknown") {
-    Write-Host "New version available: v$latest" -ForegroundColor Yellow
-} else {
-    Write-Host "Update available: v$current -> v$latest" -ForegroundColor Yellow
-}
-
-if ($CheckOnly) { exit 0 }
-
-# Download
-$zipUrl = "https://github.com/brave/brave-browser/releases/download/v$latest/brave-origin-v$latest-win32-x64.zip"
-$zipPath = Join-Path $RootDir "brave-origin-v$latest.zip"
-
-Write-Host "Downloading v$latest..." -ForegroundColor Yellow
-try {
-    Invoke-WebRequest $zipUrl -OutFile $zipPath -UseBasicParsing -TimeoutSec 600
-} catch {
-    Write-Host "Download failed: $_" -ForegroundColor Red
-    exit 1
-}
-
-# Backup
-$backup = Join-Path $RootDir "bin.bak"
-if (Test-Path $BinDir) {
-    Remove-Item -Recurse -Force $backup -ErrorAction SilentlyContinue
-    Move-Item $BinDir $backup -Force
-    Write-Host "Backed up old version" -ForegroundColor Gray
-}
-
-# Extract
-New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
-try {
-    Expand-Archive $zipPath $BinDir -Force
-    Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
-    $latest | Out-File $VersionFile -Encoding UTF8 -Force
-    Write-Host "Updated to v$latest" -ForegroundColor Green
-} catch {
-    Write-Host "Extraction failed: $_" -ForegroundColor Red
-    if (Test-Path $backup) {
-        Remove-Item -Recurse -Force $BinDir -ErrorAction SilentlyContinue
-        Move-Item $backup $BinDir -Force
-    }
-    exit 1
-}
-
-# Clean up
-Remove-Item -Recurse -Force $backup -ErrorAction SilentlyContinue
-
-# Re-apply bypass
-$LocalState = Join-Path $DataDir "Local State"
-if (Test-Path $LocalState) {
+function Save-BraveArchive {
+    param([string]$Url, [string]$Path)
+    # PowerShell 5.1 Invoke-WebRequest -OutFile interprets brackets in paths as wildcards.
+    $request = [Net.HttpWebRequest]::Create($Url)
+    $request.Timeout = 600000
+    $request.ReadWriteTimeout = 600000
+    $response = $null
+    $file = $null
     try {
-        $state = Get-Content $LocalState -Raw | ConvertFrom-Json
-        if (-not $state.brave.origin.purchase_validated) {
-            $state.brave.origin = @{ purchase_validated = $true }
-            $state | ConvertTo-Json -Depth 10 -Compress | Out-File $LocalState -Encoding UTF8 -Force
-            Write-Host "Activation re-applied" -ForegroundColor Green
-        }
-    } catch {}
+        $response = $request.GetResponse()
+        $file = [IO.File]::Create($Path)
+        $response.GetResponseStream().CopyTo($file)
+    } finally {
+        if ($file) { $file.Dispose() }
+        if ($response) { $response.Dispose() }
+    }
 }
 
-Write-Host ""
-Write-Host "Done. Run run.bat to start the updated browser." -ForegroundColor Cyan
+function Update-Brave {
+    param(
+        [string]$RootDir,
+        [switch]$CheckOnly,
+        [ValidatePattern('^(latest|\d+\.\d+\.\d+)$')][string]$Version = 'latest'
+    )
+    # Caller holds the maintenance lock through any subsequent browser launch.
+    $ErrorActionPreference = 'Stop'
+    $ProgressPreference = 'SilentlyContinue'
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    $bin = Join-Path $RootDir 'bin'
+    $exe = Join-Path $bin 'brave.exe'
+    $current = $null
+    if (Test-Path -LiteralPath $exe) {
+        Assert-BraveSignature $exe
+        $current = Get-BraveVersion $exe
+    }
+    if (-not $CheckOnly -and (Test-BraveRunning)) {
+        throw 'Close all Brave windows/background processes before installing or updating.'
+    }
+    $headers = @{ 'User-Agent' = 'BraveOriginFree' }
+    if ($env:GH_TOKEN) { $headers.Authorization = "Bearer $env:GH_TOKEN" }
+    $endpoint = if ($Version -eq 'latest') { 'latest' } else { "tags/v$Version" }
+    $release = Invoke-RestMethod "https://api.github.com/repos/brave/brave-browser/releases/$endpoint" -Headers $headers -TimeoutSec 15
+    if ($release.draft -or $release.prerelease -or $release.tag_name -notmatch '^v(\d+\.\d+\.\d+)$') {
+        throw 'GitHub did not return a stable Brave release.'
+    }
+    $latest = $Matches[1]
+    if ($Version -ne 'latest' -and $Version -ne $latest) { throw 'Release version mismatch.' }
+    Write-Host "Installed: $current; available: $latest"
+    if ($current -and [version]$current -ge [version]$latest) {
+        Write-Host 'Already up to date; downgrades are not performed.'
+        return
+    }
+    $name = "brave-origin-v$latest-win32-x64.zip"
+    $assets = @($release.assets | Where-Object { $_.name -eq $name })
+    if ($assets.Count -ne 1) { throw "Release does not contain $name." }
+    $asset = $assets[0]
+    $url = "https://github.com/brave/brave-browser/releases/download/v$latest/$name"
+    if ($asset.browser_download_url -cne $url -or $asset.digest -notmatch '^sha256:([a-fA-F0-9]{64})$') {
+        throw 'Missing SHA256 digest or unexpected download URL; refusing an unverified download.'
+    }
+    $expectedHash = $Matches[1]
+    if ($CheckOnly) { Write-Host "Update available: $latest"; return }
+
+    $stage = Join-Path $RootDir ('.update-' + [guid]::NewGuid())
+    $archive = Join-Path $stage 'browser.zip'
+    $candidate = Join-Path $stage 'new'
+    $backup = Join-Path $stage 'previous'
+    $keepRecovery = $false
+    New-Item -ItemType Directory -Path $stage | Out-Null
+    try {
+        Write-Host "Downloading and verifying Brave Origin $latest..."
+        Save-BraveArchive -Url $url -Path $archive
+        if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $expectedHash) {
+            throw 'Archive SHA256 mismatch. The installed browser has not been changed.'
+        }
+        Expand-Archive -LiteralPath $archive -DestinationPath $candidate
+        $candidateExe = Join-Path $candidate 'brave.exe'
+        Assert-BraveSignature $candidateExe
+        if ((Get-BraveVersion $candidateExe) -ne $latest) { throw 'Downloaded browser version mismatch.' }
+        if (Test-BraveRunning) { throw 'Brave started during download; close it and retry.' }
+
+        $movedOld = $false
+        try {
+            if (Test-Path -LiteralPath $bin) {
+                [IO.Directory]::Move($bin, $backup)
+                $movedOld = $true
+            }
+            [IO.Directory]::Move($candidate, $bin)
+        } catch {
+            if ($movedOld) {
+                try { [IO.Directory]::Move($backup, $bin) }
+                catch {
+                    $keepRecovery = $true
+                    throw "Update rollback failed. Previous browser is preserved at ${backup}: $_"
+                }
+            }
+            throw
+        }
+        Write-Host "Installed verified Brave Origin $latest."
+    } finally {
+        if (-not $keepRecovery) {
+            Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction Continue
+        }
+    }
+}
+
+if ($MyInvocation.InvocationName -ne '.') {
+    $lock = $null
+    try {
+        $root = Split-Path -Parent $PSScriptRoot
+        $lock = Open-BraveMaintenanceLock $root
+        Update-Brave -RootDir $root -CheckOnly:$CheckOnly -Version $Version
+        exit 0
+    } catch {
+        Write-Error $_ -ErrorAction Continue
+        exit 1
+    } finally {
+        if ($lock) { $lock.Dispose() }
+    }
+}

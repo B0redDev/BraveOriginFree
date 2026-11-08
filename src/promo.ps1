@@ -45,8 +45,8 @@ BraveOriginFree uses the official Windows Origin binary (signed by Brave) but pr
 
 **What you get:**
 - Official signed Brave Origin build (untouched, verified)
-- All extras disabled: Rewards, Wallet, Leo AI, News, VPN, Tor, P3A
-- Portable — no install, no registry, no admin rights
+- Shared launch flags request disabling optional features; support depends on Brave
+- Portable, no admin rights; optional default-browser registration writes per-user registry entries
 - MIT License
 
 **How to use:**
@@ -54,7 +54,7 @@ BraveOriginFree uses the official Windows Origin binary (signed by Brave) but pr
 2. Extract anywhere
 3. Run install.bat
 
-That's it. 2 minutes. No $60.
+Download duration depends on the connection. Updates are checked before launch when Brave is closed.
 
 $RepoUrl
 "@
@@ -66,7 +66,7 @@ Brave Origin is Brave's stripped-down browser. On Linux it's free to use. On Win
 
 The bypass is surprisingly simple: Brave writes `purchase_validated = true` to a JSON config file on Linux when you click "Proceed for free". The Windows binary checks the same file. By pre-setting that value before the browser starts, Windows Origin behaves exactly like the Linux version.
 
-No modified binaries (the exe is the official signed Brave build), no DRM circumvention. Just configuration.
+No modified binaries: downloads require the official archive SHA256 and a valid Brave executable signature. Activation and permitted use depend on Brave's implementation and terms.
 
 $RepoUrl
 "@
@@ -90,7 +90,7 @@ Brave Origin costs $60 on Windows. On Linux it's free. BraveOriginFree fixes thi
 
 ✅ No $60 purchase required
 ✅ Official signed Brave build (not modified)
-✅ No install, no admin, no registry
+Portable, no admin rights; optional default-browser registration changes per-user registry entries
 ✅ Portable - works from USB drives
 
 Download: $ReleaseUrl
@@ -108,7 +108,7 @@ BraveOriginFree is an open-source project that removes this paywall by pre-setti
 Key details:
 - Uses the official Windows Origin binary
 - Applies purchase_validated = true (same as Linux)
-- All non-essential features disabled (Rewards, Wallet, AI, News, VPN, Tor)
+- Shared configuration requests disabling optional features; behavior depends on the Brave version
 - Fully portable, no installation required
 - MIT License
 
